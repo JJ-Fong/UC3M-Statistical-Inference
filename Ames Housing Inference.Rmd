@@ -1,0 +1,502 @@
+---
+title: Ames Housing Prices
+subtitle: Statistical Inference Project
+author: Javier Fong - 100437994
+output: pdf_document
+---
+
+```{r enviroment, message=F, warning=F, echo = F}
+library(rstudioapi)
+setwd(dirname(getActiveDocumentContext()$path))
+set.seed(100437994)
+options(scipen = 100)
+```
+
+
+```{r dependencies, message=F, warning=F, echo = F}
+library(dplyr)
+library(tidyr)
+
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(fitdistrplus)
+library(logspline)
+library(EnvStats)
+library(skimr)
+library(kableExtra)
+```
+
+```{r data-load, echo = F}
+data = read.csv("project_dataset.csv", sep = ";")
+data = data %>% mutate_if(is.character, as.factor)
+```
+
+# Introduction 
+
+As for the project for the statistical inference course, I decided to analyze the Ames Housing data set. With this project I expect to get information regarding the housing market in Ames, Iowa, utilizing solely the information at hand and inferring techniques explored in class. I would expect to find differences in house prices based in groups of specific characteristics, and some relationship between characteristics that may not be so obvious. 
+
+The data set consist of 1460 observation of house sales in Ames, Iowa. It has 79 variables, but in this project I'll only work with the following:  
+
+Categorical variables: 
+
+* Street: material of the street. (2 levels)
+* HeatingQC: Quality of the heating system. (5 levels)
+* KitchenQC: Quality of the kitchen. (5 levels)
+
+Discrete variables: 
+
+* YearBuilt: year on which the house was built.
+* YearOfSale: year on which the house was sold. 
+* FullBath: number of full bathrooms. 
+* HalfBath: number of half bathrooms. 
+
+Continuous variables: 
+
+* LotArea: Lot area of the house in square feet. 
+* GarageArea: Area for the garage in square feet. 
+* SalePrice: Last selling prince is USD. 
+
+The data set can be found in this link. [(Link to Ames data set)](https://www.kaggle.com/c/house-prices-advanced-regression-techniques/overview/description)
+
+## Data Exploration 
+
+### Quick Summary 
+```{r, echo = F}
+data %>% 
+  dplyr::select(
+    YearBuilt
+    , YrSold
+    , FullBath
+    , HalfBath
+    , LotArea
+    , GarageArea
+    , SalePrice
+    , Street
+    , HeatingQC
+    , KitchenQual
+  )%>% summary()
+```
+
+
+### Numeric variables
+```{r, echo = F, warning=F, message=F}
+data %>% 
+  dplyr::select(YearBuilt, YrSold, FullBath, HalfBath, LotArea, GarageArea, SalePrice) %>% 
+  na.omit() %>% 
+  melt() %>% 
+  ggplot(
+    aes(x = value) 
+  ) + 
+  geom_histogram() +
+  facet_wrap(~variable, scale = "free")
+```
+
+### Categorical Variables
+
+```{r, echo = F}
+par(mfrow = c(1,3))
+cat_data = data %>% 
+  dplyr::select(Street, HeatingQC, KitchenQual)
+  
+barplot(table(cat_data$Street), main = "Street Material Distribution")
+barplot(table(cat_data$HeatingQC), main = "Heating Quality Distribution")
+barplot(table(cat_data$KitchenQual), main = "Kitchen Quality Distribution")
+  
+```
+
+
+# Distribution selection 
+
+The continuous variable I will analyze in this project will be **SalesPrice**. This variable describes the selling price of the property. 
+
+From the plot below we notice the variable is skew to the left, so I applied a $log()$ transformation to improve its symmetry. 
+
+```{r model-selection, warning = F, echo = F}
+par(mfrow = c(1,2))
+hist(data$SalePrice, main = "SalePrice", xlab = "SalePrice")
+x = log(data$SalePrice)
+hist(x, main = "Log(SalePrice)", xlab = "Log(SalePrice)")
+```
+
+Now, using the function *descdist()* we find the distribution closest related to our sample on the *Cullen and Frey* graph. From this graph we gather that a **normal** distribution seems to closely describe our sample.      
+
+```{r distribution, warning = F, results=F, echo = F}
+descdist(x)
+```
+
+### Normal Distribution 
+
+Using the function *fitdist* we fitted a normal distribution to our sample (transformed with a log). Using the charts below, we can see that the distribution is a pretty good fit to our sample. It only seems to have some issues at the extremes. 
+
+```{r model-selection-lognormal, warning = F}
+fit.normal = fitdist(x, "norm", method = "mle")
+plot(fit.normal)
+```
+
+## Maximum Likelihood 
+
+Using the MLE method (as a parameter in the fitdist function) we obtain the following parameter estimation for the mean and the standard deviation: 
+
+```{r, echo = F, warning=F, message=F}
+kbl(
+  data.frame(
+    fit_est = fit.normal$estimate 
+    , fit_sd = fit.normal$sd
+  )
+  , format = "pandoc"
+  , col.names = c("Estimate", "Standard Dev.")
+  , caption = "Parameter Estimation with Maximum Likelihood"
+) %>%
+  kable_styling(latex_options = c("hold_position"))
+```
+
+With this values we know that our fitted distribution looks like: 
+
+```{r, echo = F}
+dist_mean = fit.normal$estimate[1]
+dist_sd = fit.normal$estimate[2]
+n = fit.normal$n
+```
+
+
+$$X \sim N(\mu = `r round(dist_mean,4)`, \sigma^2 = `r round(dist_sd^2,4)`)$$
+
+# One-sample Inference
+
+## Estimators for the mean 
+
+### Estimator \(\hat\mu_1 = \overline{x}\) (Geometric Sample Mean)
+
+```{r, echo = F}
+alpha = 0.05
+
+mu1 = sum(x)/ n 
+mu1_var = var(x) / n
+mu1_sd = sd(x)
+mu1_t = qt(alpha / 2, df = n-1, lower.tail = F)
+mu1_ci = mu1 + c(-1,1) * mu1_t * mu1_sd / sqrt(n)
+mu1_error = sqrt(mu1_var)/mu1 
+```
+
+$$\hat\mu_1 = \overline X = \frac{1}{n} \sum_{i = 1}^{n} xi = `r mu1`$$
+
+Given that, 
+
+$$\hat\mu_1 = \overline X = \frac{1}{n} \sum_{i = 1}^{n} xi = \frac{1}{n} n\mu = \mu$$
+
+we can say that $\hat\mu_1$ is an unbiased estimator of the population mean ($\mu$). 
+
+### Estimator \(\hat\mu_2 = Me(x)\) (Sample Median)
+
+```{r, echo = F}
+mu2 = median(x)
+mu2_var = (pi/2)*(var(x)/n)
+mu2_error = sqrt(mu2_var)/mu2
+mu2_t = qt(alpha / 2, df = n-1, lower.tail = F)
+mu2_ci = mu2 + c(-1,1) * mu2_t * sqrt(mu2_var) / sqrt(n)
+#Get variance of median 
+```
+
+
+$$\hat\mu_2 = Me(X) = `r mu2`$$
+
+By definition, we know that 
+
+$$F(\hat\mu_2) = \frac{1}{2} = \int_{-\infty}^{\hat\mu_2}f(x)dx$$
+$$\frac{1}{\sigma\sqrt{2\pi}} \int_{-\infty}^{\hat\mu_2}e^{\frac{-(x-\mu)^2}{2\sigma^2}}dx = \frac{1}{2}$$
+$$\frac{1}{\sigma\sqrt{2\pi}} \int_{-\infty}^{\mu}e^{\frac{-(x-\mu)^2}{2\sigma^2}}dx  + \frac{1}{\sigma\sqrt{2\pi}}$$ $$\int_{\mu}^{\hat\mu_2}e^{\frac{-(x-\mu)^2}{2\sigma^2}}dx= \frac{1}{2}$$
+
+
+But, 
+$$\frac{1}{\sigma\sqrt{2\pi}} \int_{-\infty}^{\mu}e^{\frac{-(x-\mu)^2}{2\sigma^2}}dx = \frac{1}{\sigma\sqrt{2\pi}} \int_{-\infty}^{0}e^{\frac{-Z^2}{2}}dz = \frac{1}{2}$$
+
+Which means, 
+$$\frac{1}{2}  + \frac{1}{\sigma\sqrt{2\pi}} \int_{\mu}^{\hat\mu_2}e^{\frac{-(x-\mu)^2}{2\sigma^2}}dx= \frac{1}{2}$$
+$$\frac{1}{\sigma\sqrt{2\pi}} \int_{\mu}^{\hat\mu_2}e^{\frac{-(x-\mu)^2}{2\sigma^2}}dx= 0 \implies \mu = \hat\mu_2$$
+
+With this we conclude that $\hat\mu_2$ is also an unbiased estimator of the mean. 
+
+### Estimator Comparison  
+
+If we examine the variance of both estimators we get that: 
+
+$$Var(\hat\mu_1) = \frac{\sigma^2}{n}$$
+$$Var(\hat\mu_2) = \frac{\pi}{2}\frac{\sigma^2}{n}$$
+
+Which means, 
+$$Var(\hat\mu_1) \le Var(\hat\mu_2)$$
+
+So, even though both estimators are unbiased, the geometric mean is a more precise estimator of the population mean. 
+
+We can see this in our sample because, as we estimate the variance as well: 
+
+$$\hat{Var}(\hat\mu_1) = \frac{S'^2}{n} = `r round(mu1_var,8)` \le `r round(mu2_var,8)` = \frac{\pi}{2}\frac{S'^2}{n} = \hat{Var}(\hat\mu_2)$$
+
+
+### Estimators Error
+
+Given that both estimators are unbiased, we used CV to calculate the error of the estimators. With the following results.
+
+
+
+$$CV(\hat\mu_1) = \frac{Var(\hat\mu_1)}{\hat\mu_1} = `r round(mu1_error,8)`$$
+$$CV(\hat\mu_2) = \frac{Var(\hat\mu_2)}{\hat\mu_2} = `r round(mu2_error,8)`$$
+
+### 95% Confidence Interval 
+
+Using the T-statistic, we calculated the confidence interval for both estimator as: 
+
+The error of $\hat\mu_1$ is less that $\hat\mu_2$
+$$P(`r mu1_ci[1]` \le \hat\mu_1\le`r mu1_ci[2]`) = 0.95$$
+$$P(`r mu2_ci[1]` \le \hat\mu_2\le`r mu2_ci[2]`) = 0.95$$
+
+## Proportion in Population 
+
+Now we'll examine the variable *HalfBath*, that describe the amount half bathrooms in the property (bathrooms without shower). But we'll reduce the levels to just 2:
+
+$$ 
+hasHalfBathroom = 
+\begin{cases}
+0 , HalfBathroom = 0 \\
+1 , HalfBathrom > 0
+\end{cases}
+$$
+
+This is pretty close to the real variable given that only 12 observations have more than 1 & half bathrooms. For this analysis we assume this variable can be regarded as random.  
+
+```{r, echo = F}
+data = data %>% 
+  mutate(hasHalfBath = ifelse(HalfBath == 0, 0, 1))
+
+# Proportion
+p_hat = mean(data$hasHalfBath)
+
+# Variance 
+p_variance = p_hat*(1 - p_hat)/n
+# 95% CI 
+
+p_t = qt(alpha / 2, df = n-1, lower.tail = F)
+p_ci = p_hat + c(-1,1) * p_t * sqrt(p_variance)
+
+```
+
+The proportion of observation that belong to this group is the mean value of the observations, given that we estimate that each observation behaves as a $Bernulli$ r.v. 
+
+$$\hat{p}=\overline{X} = `r p_hat`$$ 
+$$Var(\overline{X}) = \frac{\hat{p}{(1-\hat{p}})}{n}=`r p_variance`$$
+
+### 95% Confidence Interval 
+
+Using the T-statistic, giving that we do not know the real variance of the population, we get the following confidence intervals at 95%: 
+
+$$CI_{0.95}(p) =  [\hat{p} - t_{`r n-1`:0.025}\sqrt{\frac{\hat{p}(1-\hat{p})}{n}},\hat{p} + t_{`r n-1`:0.025}\sqrt{\frac{\hat{p}(1-\hat{p})}{n}}] = [`r round(p_ci[1],8)` , `r round(p_ci[2],8)`]$$
+
+
+# Inference with more than one sample
+
+In this section we'll create groups using the variable *KitchenQual* that describes the current quality of the kitchen at the property. This variable can take 4 different values, Ex = Excellent, Fa = Fair, Gd = Good and TA = Typical/Average. Now we calculate the mean *SalePrice* for each of this groups and the cv for this estimators. 
+
+```{r, echo = F, warning=F}
+data %>% 
+  group_by(KitchenQual) %>% 
+  summarise(
+    group_mean = mean(log(SalePrice))
+    , group_size = n()
+    , group_var = var(log(SalePrice))/n()
+    , group_cv = 100 * (sqrt(var(log(SalePrice))/n())/mean(log(SalePrice)))
+  ) %>% 
+  dplyr::select (KitchenQual, group_mean, group_cv) %>% 
+  kbl(
+    format = "pandoc"
+    , caption = "Estimate mean Sale Price value by Kitchen Quality"
+    , col.names = c("Kitchen Quality", "mean", "cv")
+  ) %>%
+    kable_styling(latex_options = c("hold_position"))
+```
+
+There seems to be a relationship between the quality of the kitchen and the sale price of the house, because the order from highest to lowest mean Sale Price is Excellent, Good, Typical and Fair. 
+
+Now, using the *hasHalfBath* variable, we estimate the proportion by *KitchenQuality*
+
+```{r, echo = F, warning=F, message = F}
+
+ex4_proportions = data %>% 
+  dplyr::select(KitchenQual, hasHalfBath) %>% 
+  dplyr::group_by(KitchenQual, hasHalfBath) %>% 
+  dplyr::summarise(group2_size = n()) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::group_by(KitchenQual) %>% 
+  dplyr::mutate(group1_size = sum(group2_size)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(
+    p_hat = group2_size/group1_size
+    , mse = p_hat * (1 - p_hat) / group2_size
+  ) 
+
+ex4_proportions %>% 
+  filter(hasHalfBath == 1) %>% 
+  dplyr::select(KitchenQual, p_hat, mse) %>% 
+  kbl(
+    format = "pandoc"
+    , caption = "Proportion of hasHalfBath by KitchenQuality"
+    , col.names = c("Kitchen Quality", "Est. Proportion", "MSE")
+  ) %>%
+    kable_styling(latex_options = c("hold_position"))
+```
+
+It is interesting to notice that the group with the highest MSE is the one with the smaller sample size, FA with only 35 observations. In contrast with the *Gd* group, which has a size of 471 observation and the smallest MSE. 
+
+Now, we'll compare the mean Sale Price of the two largest groups by Kitchen Quality, Typical against Good. 
+
+```{r, echo=F, warning = F}
+group_means = data %>% 
+  filter(KitchenQual %in% c("TA", "Gd")) %>% 
+  group_by(KitchenQual) %>% 
+  summarise(
+    group_size = n()
+    , mean_x = mean(log(SalePrice))
+    , var_x = var(log(SalePrice))/n()
+  )
+
+group_means %>% 
+  dplyr::select(KitchenQual, group_size, mean_x) %>% 
+  kbl(
+    format = "pandoc"
+    , caption = "Mean Sale Price by Kitchen Quality group"
+    , col.names = c("Kitchen Quality", "n", "Mean")
+  ) %>%
+    kable_styling(latex_options = c("hold_position"))
+```
+
+```{r, echo = F}
+#Confidence Interval Comparison
+alpha = 0.05
+
+S = sqrt(sum(group_means$group_size -1 * group_means$var_x))/(sum(group_means$group_size)-2)
+
+t = qt(
+  alpha/2
+  , df = (sum(group_means$group_size)-2)
+  , lower.tail = F
+)
+
+diff = group_means$mean_x[1] - group_means$mean_x[2] + c(-1,1) * t * S * sqrt(sum(1 / group_means$group_size))
+```
+
+The pooled Variance of both groups, based in the sample variance if each one is:
+
+
+
+$$S^2 = \frac{(n_1-1){S'}_{1}^{2}+(n_2-1){S'}_{2}^{2}}{n_1 + n_2 - 2} = `r S`$$
+
+Using this estimator, and the T-statistic, we can calculate a confidence interval of the difference between both means. Which look like this, 
+
+$$CI_{0.95}(\mu_1 - \mu_2) = \overline{X_1} - \overline{X_2} \pm t_{n_1+n_2-2;0.025} S\sqrt{\frac{1}{n_1}+\frac{1}{n_2}} = [`r diff[1]`,`r diff[2]`]$$
+
+This tells us that the difference is between `r diff[1]` and `r diff[2]`. Given that this range is positive, we can say that the mean sale price of properties with good kitchens is higher than the sale price of typical kitchens. 
+
+We can compare this two means by a hypothesis testing of equality of means. For that we calculate a test statistic that reads as 
+
+$$T = \frac{\overline{X_1}-\overline{X_2}}{S\sqrt{\frac{1}{n_1}+\frac{1}{n_2}}}$$
+
+Where we use the same $S$ estimator as in the confidence interval. 
+
+The idea is to compare this test statistc against the T-statistic $t_{n_1+n_2-2;\alpha}$ and there we have 3 hypothesis: 
+
+a. $C_a = (T > t_{n_1+n_2-2;\alpha})$
+b. $C_b = (T < -t_{n_1+n_2-2;\alpha})$
+c. $C_a = (|T| > t_{n_1+n_2-2;\alpha/2})$
+
+Based on this comparisons, we can know which group mean is larger. In our case the values are as follows: 
+
+```{r, echo = F}
+t_half = qt(
+  alpha/2
+  , df = (sum(group_means$group_size)-2)
+  , lower.tail = F
+)
+
+t_whole = qt(
+  alpha
+  , df = (sum(group_means$group_size)-2)
+  , lower.tail = F
+)
+
+Tstat = (group_means$mean_x[1] - group_means$mean_x[2])/(sqrt(S)*sqrt(sum(1/group_means$group_size)))
+t_comp = c(Tstat, t_half, t_whole)
+```
+
+$$T = `r t_comp[1]`$$
+$$t_{n_1+n_2-2;\alpha} = `r t_whole`$$
+$$t_{n_1+n_2-2;\alpha/2} = `r t_half`$$
+
+This comparison confirms our finding in the confidence intervals, that the mean sale price for good quality kitchens is higher than the mean sale price with average kitchens.  
+
+Now, we'll do a similar analysis, but instead of mean Sale Price by group, we'll analyze the proportion of half bathrooms based on the kitchen quality. 
+
+```{r, echo = F}
+group_proportions_comp = ex4_proportions %>% 
+  filter(hasHalfBath == 1, KitchenQual %in% c("TA", "Gd")) 
+
+#Confidence Interval Comparison
+alpha = 0.05
+
+S = sqrt(sum(group_proportions_comp$group2_size - 1 * group_proportions_comp$mse))/(sum(group_proportions_comp$group2_size)-2)
+
+t = qt(
+  alpha/2
+  , df = (sum(group_proportions_comp$group2_size)-2)
+  , lower.tail = F
+)
+
+diff = group_proportions_comp$p_hat[1] - group_proportions_comp$p_hat[2] + c(-1,1) * t * S * sqrt(sum(1 / group_proportions_comp$group2_size))
+
+
+```
+
+We use a similar procedure as the means difference of means, and got the following interval for the difference in proportions
+
+$$\begin{aligned} 
+\\ CI_{0.95}(p_1 - p_2) = \hat{p_1} - \hat{p_2} \pm t_{n_1+n_2-2;0.025} S\sqrt{\frac{1}{n_1}+\frac{1}{n_2}} = [`r diff[1]`,`r diff[2]`]
+\end{aligned}$$
+
+This positive difference tells us that there is a higher probability for a house with good kitchen to have a half bathroom, than a house with an average kitchen to have a half bathroom. 
+
+We can test via equiality of proportions which $\hat{p}$ is higher with the following results, 
+
+```{r, echo = F}
+t_half = qt(
+  alpha/2
+  , df = (sum(group_proportions_comp$group2_size)-2)
+  , lower.tail = F
+)
+
+t_whole = qt(
+  alpha
+  , df = (sum(group_proportions_comp$group2_size)-2)
+  , lower.tail = F
+)
+
+Tstat = (group_proportions_comp$p_hat[1] - group_proportions_comp$p_hat[2])/(sqrt(S)*sqrt(sum(1/group_proportions_comp$group2_size)))
+t_comp = c(Tstat, t_half, t_whole)
+```
+
+$$\begin{aligned} 
+\\ T = `r t_comp[1]`
+\\ t_{n_1+n_2-2;\alpha} = `r t_whole`
+\\ t_{n_1+n_2-2;\alpha/2} = `r t_half`
+\end{aligned}$$
+
+Here we confirm our finding that housed with good kitchens have a higher proportion of half bathroom occurrence than houses with average kitchens. 
+
+# Conclusions 
+
+1. We can describe the sale price of houses at Ames, Iowa very accurately as normal distribution with parameters  
+$$\begin{aligned} 
+log(X) \sim N(\mu = `r round(dist_mean,4)`, \sigma^2 = `r round(dist_sd^2,4)`)
+\end{aligned}$$
+2. Even though the geometric mean and the median are both unbiased predictors for the mean of a Normal distribution, the geometric mean is better given its smaller variance. 
+3. Groups with higher size have smaller variance. 
+4. There seems to be a relationship between KitchenQuality and SalePrice. Houses with better kitchens have a higher selling price. 
+5. Also houses with "good" kitchens tend to be more likely to have half bathrooms.  
